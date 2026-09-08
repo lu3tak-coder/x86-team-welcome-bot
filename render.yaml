@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: x86-team-welcome-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: GENERAL_TOPIC_ID
+        value: "1"
+      - key: WELCOME_IMAGE
+        value: photo_2026-08-28_02-08-41.jpg
+      - key: PORT
+        value: "10000"
+
