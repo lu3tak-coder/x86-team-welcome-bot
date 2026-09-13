@@ -161,6 +161,15 @@ async def welcome_new_members(
     if message is None or not message.new_chat_members:
         return
 
+    bots = [m for m in message.new_chat_members if m.is_bot]
+    for bot in bots:
+        logger.info("Bot detectado entrando no chat %s: %s", message.chat_id, bot.full_name)
+        try:
+            await context.bot.ban_chat_member(message.chat_id, bot.id)
+            logger.info("Bot %s banido do chat %s", bot.full_name, message.chat_id)
+        except Exception as exc:
+            logger.warning("Falha ao banir bot %s no chat %s: %s", bot.full_name, message.chat_id, exc)
+
     members = [member for member in message.new_chat_members if not member.is_bot]
     if not members:
         return
@@ -188,6 +197,15 @@ async def welcome_chat_member(
 
     was_member, is_member = result
     user = chat_member.new_chat_member.user
+
+    if is_member and user.is_bot:
+        logger.info("Bot detectado entrando no chat %s: %s", chat_member.chat.id, user.full_name)
+        try:
+            await context.bot.ban_chat_member(chat_member.chat.id, user.id)
+            logger.info("Bot %s banido do chat %s", user.full_name, chat_member.chat.id)
+        except Exception as exc:
+            logger.warning("Falha ao banir bot %s no chat %s: %s", user.full_name, chat_member.chat.id, exc)
+        return
 
     if user.is_bot:
         return
