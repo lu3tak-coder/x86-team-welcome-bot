@@ -128,14 +128,16 @@ async def send_welcome_photo(bot, chat_id: int, members: list, thread_id: int | 
 
 
 def extract_status_change(chat_member_update: ChatMemberUpdated) -> tuple[bool, bool] | None:
-    """Determina se a alteração de status corresponde a uma entrada no chat."""
+    """Determina se a alteracao de status corresponde a uma entrada no chat."""
     status_change = chat_member_update.difference().get("status")
     old_is_member, new_is_member = chat_member_update.difference().get("is_member", (None, None))
 
-    if status_change is None:
+    if status_change is None and old_is_member == new_is_member:
         return None
 
-    old_status, new_status = status_change
+    old_status = chat_member_update.old_chat_member.status if chat_member_update.old_chat_member else None
+    new_status = chat_member_update.new_chat_member.status if chat_member_update.new_chat_member else None
+
     was_member = old_status in [
         ChatMemberStatus.MEMBER,
         ChatMemberStatus.OWNER,
@@ -204,6 +206,108 @@ async def welcome_chat_member(
             context.bot,
             chat_member.chat.id,
             [user],
+            thread_id=GENERAL_TOPIC_ID if GENERAL_TOPIC_ID > 0 else None,
+        )
+
+
+def goodbye_caption(member) -> str:
+    return (
+        "<blockquote>"
+        f"👋 <b>{member_mention(member)} saiu do grupo.</b>\n\n"
+        "X86 Team é uma comunidade focada em Cybersegurança, Hacking Ético, "
+        "Programação, Redes e Tecnologia.\n\n"
+        "🔐 Aqui, conhecimento é a nossa principal ferramenta. Exploramos "
+        "conceitos de segurança ofensiva e defensiva, análise de "
+        "vulnerabilidades, privacidade."
+        "</blockquote>"
+    )
+
+
+async def send_goodbye_message(bot, chat_id: int, member, thread_id: int | None = None) -> bool:
+    """Envia mensagem de despedida com fallback caso o tópico não exista."""
+    target_thread = thread_id if thread_id is not None else (GENERAL_TOPIC_ID if GENERAL_TOPIC_ID > 0 else None)
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            message_thread_id=target_thread,
+            text=goodbye_caption(member),
+            parse_mode=ParseMode.HTML,
+        )
+        logger.info(
+            "Despedida enviada com sucesso para %s no chat %s (thread_id: %s)",
+            member.full_name,
+            chat_id,
+            target_thread,
+        )
+        return True
+    except Exception as exc:
+        logger.warning(
+            "Falha ao enviar despedida com message_thread_id=%s: %s. Tentando sem thread_id...",
+            target_thread,
+            exc,
+        )
+        try:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=goodbye_caption(member),
+                parse_mode=ParseMode.HTML,
+            )
+            logger.info(
+                "Despedida enviada (sem tópico) para %s no chat %s",
+                member.full_name,
+                chat_id,
+            )
+            return True
+        except Exception as exc2:
+            logger.error("Falha ao enviar despedida sem tópico no chat %s: %s", chat_id, exc2)
+            return False
+
+
+async def goodbye_new_members(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Captura membros que sairam via mensagem de servico."""
+    message = update.effective_message
+    if message is None or not message.left_chat_member:
+        return
+
+    member = message.left_chat_member
+    if member.is_bot:
+        return
+
+    logger.info("Membro saiu via mensagem de servico: %s", member.full_name)
+    await send_goodbye_message(
+        context.bot,
+        message.chat_id,
+        member,
+        thread_id=message.message_thread_id or (GENERAL_TOPIC_ID if GENERAL_TOPIC_ID > 0 else None),
+    )
+
+
+async def goodbye_chat_member(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Captura membros que sairam via link de convite, expulsao ou aprovacao."""
+    chat_member = update.chat_member
+    if chat_member is None:
+        return
+
+    result = extract_status_change(chat_member)
+    if result is None:
+        return
+
+    was_member, is_member = result
+    user = chat_member.new_chat_member.user
+
+    if user.is_bot:
+        return
+
+    if was_member and not is_member:
+        logger.info("Usuario %s saiu do grupo (ChatMemberUpdated)!", user.full_name)
+        await send_goodbye_message(
+            context.bot,
+            chat_member.chat.id,
+            user,
             thread_id=GENERAL_TOPIC_ID if GENERAL_TOPIC_ID > 0 else None,
         )
 
@@ -283,6 +387,16 @@ def main() -> None:
     # Boas-vindas quando entra via link de convite ou aprovacao (ChatMemberUpdated)
     application.add_handler(
         ChatMemberHandler(welcome_chat_member, ChatMemberHandler.CHAT_MEMBER)
+    )
+
+    # Despedida quando membro sai via mensagem de servico
+    application.add_handler(
+        MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, goodbye_new_members)
+    )
+
+    # Despedida quando sai via link de convite, expulsao ou aprovacao (ChatMemberUpdated)
+    application.add_handler(
+        ChatMemberHandler(goodbye_chat_member, ChatMemberHandler.CHAT_MEMBER)
     )
 
     # Notificacao quando o proprio bot for adicionado ou alterado
