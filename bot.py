@@ -312,6 +312,47 @@ async def goodbye_chat_member(
         )
 
 
+async def block_links(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Bloqueia mensagens com link de usuarios que nao sao adms."""
+    message = update.effective_message
+    if message is None or not message.text:
+        return
+
+    has_url = any(
+        entity.type in ("url", "text_link") for entity in (message.entities or [])
+    )
+    if not has_url:
+        return
+
+    chat = update.effective_chat
+    user = update.effective_user
+    if not chat or not user:
+        return
+
+    try:
+        member = await context.bot.get_chat_member(chat.id, user.id)
+    except Exception:
+        return
+
+    if member.status in ("administrator", "creator"):
+        return
+
+    logger.info("Link bloqueado de %s no chat %s", user.full_name, chat.id)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    try:
+        await message.reply_text(
+            "⚠️ <b>Atenção!</b> Não é permitido enviar links aqui.\n"
+            "Contate um administrador caso precise compartilhar um link.",
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception:
+        pass
+
+
 async def cmd_teste(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Comando /teste ou /id para verificar IDs do chat/topico e permissao do bot."""
     message = update.effective_message
@@ -402,6 +443,11 @@ def main() -> None:
     # Notificacao quando o proprio bot for adicionado ou alterado
     application.add_handler(
         ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER)
+    )
+
+    # Bloqueio de links para nao-admins
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, block_links)
     )
 
     application.add_error_handler(error_handler)
